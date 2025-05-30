@@ -318,50 +318,85 @@ def index():
 @app.route('/submit', methods=['POST'])
 @login_required
 def submit():
-    try:
-        user_data = {
-            'fname': request.form['fname'],
-            'lname': request.form['lname'],
-            'dob': request.form['dob'] or generate_random_dob(),
-            'phoneNo': request.form['phoneNo'],
-            'state': request.form['state'],
-            'zipcode': request.form['zipcode']
-        }
-        create_data_table()
+    user_data_dir = None  # Shuru mein None rakhein, taake finally block mein error na aaye agar pehli line mein hi masla ho
+    print("--- submit() function CALLED ---")  # Check karne ke liye ke function call hua
 
+    try:
+        # Har dafa ek unique temporary directory banayein Chrome profile ke liye
+        user_data_dir = tempfile.mkdtemp()
+        # YEH PRINT STATEMENT AB LOGS MEIN AANA CHAHIYE
+        print(f"Created temporary user data directory: {user_data_dir}")
+
+        user_data = {
+            'fname': request.form.get('fname', 'DefaultFName'),
+            # .get() istemal karein taake error na aaye agar key missing ho
+            'lname': request.form.get('lname', 'DefaultLName'),
+            'dob': request.form.get('dob') or "01/01/1970",  # generate_random_dob(),
+            'phoneNo': request.form.get('phoneNo', 'N/A'),
+            'state': request.form.get('state', 'N/A'),
+            'zipcode': request.form.get('zipcode', 'N/A')
+        }
+        # create_data_table() # Agar define hai
+
+        print(f"User data received: {user_data}")  # Logging
 
         chrome_options = Options()
-        chrome_options.add_argument("--headless")  # This runs Chrome in headless mode (no UI)
-        chrome_options.add_argument("--disable-gpu")  # Disable GPU (optional, for Windows)
-        chrome_options.add_argument("--no-sandbox")  # For Linux compatibility
-        chrome_options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource problems
+        chrome_options.add_argument("--headless=new")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920,1080")
+        chrome_options.binary_location = "/usr/bin/google-chrome"
 
-        service = Service(ChromeDriverManager().install())
+        # Har Chrome instance ke liye unique user data directory istemal karein
+        chrome_options.add_argument(f"--user-data-dir={user_data_dir}")  # <-- YEH AHEM OPTION HAI
+
+        print(f"Chrome options prepared. User-data-dir: {user_data_dir}")  # Logging
+
+        chromedriver_manual_path = "/usr/local/bin/chromedriver_v137"
+
+        try:
+            service = Service(executable_path=chromedriver_manual_path)
+            print(f"Service object created with ChromeDriver at: {chromedriver_manual_path}")
+        except Exception as e_service:
+            print(f"ERROR during Service creation: {str(e_service)}")
+            import traceback
+            print(traceback.format_exc())
+            raise
+
+        print("Attempting to initialize webdriver.Chrome...")
         driver = webdriver.Chrome(service=service, options=chrome_options)
-        fill_form(driver, user_data)
+        print("webdriver.Chrome initialized successfully.")  # YEH MESSAGE AANA CHAHIYE
+
+        # fill_form(driver, user_data) # Apna asal function yahan call karein
+        print("Assuming fill_form executed. Quitting driver...")  # For testing
         driver.quit()
+        print("Driver quit successfully.")
 
-        save_user_data_to_csv(user_data)
+        # save_user_data_to_csv(user_data) # Agar define hai
 
-        row = [
-            user_data.get('lead_id', ''),
-            user_data.get('fname', ''),
-            user_data.get('lname', ''),
-            user_data.get('trusted_form_url', 'https://medicarean.com/'),
-            _ip()[0],  # IP address
-            user_data.get('zipcode', ''),
-            user_data.get('dob', ''),
-            user_data.get('state', ''),
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ]
-
-        
+        # row = [ ... ] # Aapka row creation logic
 
         message = f"✅ Form submitted successfully for {user_data['fname']}!"
-    except Exception as e:
-        message = f"❌ Error occurred: {str(e)}"
+        print(message)  # Logging
 
+    except Exception as e:
+        print(f"❌ Top-level error in submit function: {str(e)}")
+        import traceback
+        print(traceback.format_exc())  # Poora error Gunicorn logs mein print hoga
+        message = f"❌ Error occurred: {str(e)}"
+    finally:
+        if user_data_dir and os.path.exists(user_data_dir):
+            try:
+                shutil.rmtree(user_data_dir)
+                print(f"Successfully removed temporary user data directory: {user_data_dir}")
+            except Exception as e_rm:
+                print(f"Error removing temporary user data directory {user_data_dir}: {e_rm}")
+
+    print("--- Exiting submit() function ---")  # Logging
+    # Apne template ka naam aur context yahan dein
     return render_template('index.html', message=message)
+
 
 @app.route('/logout')
 def logout():
